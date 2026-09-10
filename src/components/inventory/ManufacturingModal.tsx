@@ -206,7 +206,7 @@ export const ManufacturingModal: React.FC<ManufacturingModalProps> = ({
       const matchingBOM = boms.find((b) => b.finishedItemId === newItemId);
       if (matchingBOM) {
         setSelectedBOMId(matchingBOM.id);
-        applyBOMTemplate(matchingBOM, outputQuantity);
+        applyBOMTemplate(matchingBOM, Number(outputQuantity) || 1);
       }
     }
   };
@@ -397,7 +397,7 @@ export const ManufacturingModal: React.FC<ManufacturingModalProps> = ({
 
   // Validation
   const hasValidRawMaterials = rawMaterials.some((r) => r.itemId && r.quantity > 0);
-  const isFormValid = finishedItemId && outputQuantity > 0 && hasValidRawMaterials;
+  const isFormValid = finishedItemId && Number(outputQuantity) > 0 && hasValidRawMaterials;
 
   // Submit Manufacturing Entry
   const handleSubmit = (e: React.FormEvent) => {
@@ -563,7 +563,7 @@ export const ManufacturingModal: React.FC<ManufacturingModalProps> = ({
                     value={selectedBOMId}
                     onChange={(e) => {
                       const found = boms.find((b) => b.id === e.target.value);
-                      if (found) applyBOMTemplate(found, outputQuantity);
+                      if (found) applyBOMTemplate(found, Number(outputQuantity) || 1);
                     }}
                     className="text-xs bg-slate-50 border border-indigo-200 rounded-xl px-2.5 py-1.5 text-slate-800 font-bold focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
                   >

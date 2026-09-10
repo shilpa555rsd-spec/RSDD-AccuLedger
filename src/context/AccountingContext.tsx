@@ -30,6 +30,21 @@ import {
   INITIAL_PRODUCTIONS,
 } from '../data/initialData';
 import { getFinancialYearDates, getTodayDateString } from '../utils/formatters';
+import {
+  getCloudCompanies,
+  saveCompanyToCloud,
+  deleteCompanyFromCloud,
+  loadCompanyDataFromCloud,
+  saveVoucherToCloud,
+  deleteVoucherFromCloud,
+  saveLedgerToCloud,
+  deleteLedgerFromCloud,
+  saveItemToCloud,
+  deleteItemFromCloud,
+  saveGroupToCloud,
+  batchSyncEntireCompanyToCloud,
+} from '../services/firebaseSync';
+import { useAuth } from './AuthContext';
 
 interface AccountingContextType {
   // Companies Management
@@ -120,6 +135,7 @@ interface AccountingContextType {
   exportBackupJson: () => void;
   importBackupJson: (file: File) => Promise<BackupImportResult>;
   resetToSampleData: () => void;
+  forceSyncAllToCloud: () => Promise<void>;
 }
 
 const AccountingContext = createContext<AccountingContextType | undefined>(undefined);
@@ -135,59 +151,124 @@ const STORAGE_KEYS = {
 };
 
 function getInitialCompanies(): { companies: CompanyProfile[]; activeId: string } {
-  const savedCompanies = localStorage.getItem(STORAGE_KEYS.COMPANIES);
-  const savedActiveId = localStorage.getItem(STORAGE_KEYS.ACTIVE_COMPANY_ID);
+  const companiesMap = new Map<string, CompanyProfile>();
 
+  // 1. Primary source: saved companies list
+  const savedCompanies = localStorage.getItem(STORAGE_KEYS.COMPANIES);
   if (savedCompanies) {
     try {
       const parsed: CompanyProfile[] = JSON.parse(savedCompanies);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const activeId = savedActiveId && parsed.some((c) => c.id === savedActiveId)
-          ? savedActiveId
-          : parsed[0].id;
-        return { companies: parsed, activeId };
+      if (Array.isArray(parsed)) {
+        parsed.forEach((c) => {
+          if (c && c.id) {
+            companiesMap.set(c.id, c);
+          }
+        });
       }
     } catch (e) {
       console.error('Error parsing saved companies:', e);
     }
   }
 
-  // Check legacy single company profile
-  const legacyCompany = localStorage.getItem(STORAGE_KEYS.LEGACY_COMPANY);
-  let defaultCompany: CompanyProfile = INITIAL_COMPANY_PROFILE;
-  if (legacyCompany) {
-    try {
-      const parsed = JSON.parse(legacyCompany);
-      defaultCompany = { ...INITIAL_COMPANY_PROFILE, ...parsed, id: parsed.id || 'comp-1' };
-    } catch (e) {
-      console.error('Error parsing legacy company:', e);
+  // 2. Scan individual backup profiles: rsdd_comp_{id}_profile
+  const allKeys = Object.keys(localStorage);
+  for (const key of allKeys) {
+    if (key.startsWith('rsdd_comp_') && key.endsWith('_profile')) {
+      try {
+        const val = localStorage.getItem(key);
+        if (val) {
+          const prof = JSON.parse(val);
+          if (prof && prof.id && !companiesMap.has(prof.id)) {
+            companiesMap.set(prof.id, prof);
+          }
+        }
+      } catch (e) {}
     }
   }
 
-  const defaultId = defaultCompany.id || 'comp-1';
+  // 3. Scan for any orphaned data keys: rsdd_comp_{id}_vouchers, rsdd_comp_{id}_ledgers, etc.
+  for (const key of allKeys) {
+    const match = key.match(/^rsdd_comp_([a-zA-Z0-9_-]+)_(vouchers|ledgers|groups|items)$/);
+    if (match) {
+      const compId = match[1];
+      if (!companiesMap.has(compId) && compId !== 'undefined' && compId !== 'null') {
+        const inferredName = compId === 'comp-1' ? INITIAL_COMPANY_PROFILE.companyName : `Company (${compId.replace('comp-', '')})`;
+        const recoveredComp: CompanyProfile = {
+          id: compId,
+          companyName: inferredName,
+          state: 'Delhi',
+          stateCode: '07',
+          country: 'India',
+          phone: '',
+          email: '',
+          address: '',
+          pincode: '',
+          createdAt: getTodayDateString(),
+        };
+        companiesMap.set(compId, recoveredComp);
+      }
+    }
+  }
+
+  // 4. Fallback if empty: add default company
+  if (companiesMap.size === 0) {
+    const legacyCompany = localStorage.getItem(STORAGE_KEYS.LEGACY_COMPANY);
+    let defaultCompany: CompanyProfile = INITIAL_COMPANY_PROFILE;
+    if (legacyCompany) {
+      try {
+        const parsed = JSON.parse(legacyCompany);
+        defaultCompany = { ...INITIAL_COMPANY_PROFILE, ...parsed, id: parsed.id || 'comp-1' };
+      } catch (e) {
+        console.error('Error parsing legacy company:', e);
+      }
+    }
+    const defaultId = defaultCompany.id || 'comp-1';
+    companiesMap.set(defaultId, { ...defaultCompany, id: defaultId });
+  }
+
+  const list = Array.from(companiesMap.values());
 
   // Migrate legacy data to default company if available
-  if (!localStorage.getItem(`rsdd_comp_${defaultId}_groups`)) {
+  const firstCompId = list[0]?.id || 'comp-1';
+  if (!localStorage.getItem(`rsdd_comp_${firstCompId}_groups`)) {
     const legacyGroups = localStorage.getItem(STORAGE_KEYS.LEGACY_GROUPS);
-    if (legacyGroups) localStorage.setItem(`rsdd_comp_${defaultId}_groups`, legacyGroups);
+    if (legacyGroups) localStorage.setItem(`rsdd_comp_${firstCompId}_groups`, legacyGroups);
   }
-  if (!localStorage.getItem(`rsdd_comp_${defaultId}_ledgers`)) {
+  if (!localStorage.getItem(`rsdd_comp_${firstCompId}_ledgers`)) {
     const legacyLedgers = localStorage.getItem(STORAGE_KEYS.LEGACY_LEDGERS);
-    if (legacyLedgers) localStorage.setItem(`rsdd_comp_${defaultId}_ledgers`, legacyLedgers);
+    if (legacyLedgers) localStorage.setItem(`rsdd_comp_${firstCompId}_ledgers`, legacyLedgers);
   }
-  if (!localStorage.getItem(`rsdd_comp_${defaultId}_items`)) {
+  if (!localStorage.getItem(`rsdd_comp_${firstCompId}_items`)) {
     const legacyItems = localStorage.getItem(STORAGE_KEYS.LEGACY_ITEMS);
-    if (legacyItems) localStorage.setItem(`rsdd_comp_${defaultId}_items`, legacyItems);
+    if (legacyItems) localStorage.setItem(`rsdd_comp_${firstCompId}_items`, legacyItems);
   }
-  if (!localStorage.getItem(`rsdd_comp_${defaultId}_vouchers`)) {
+  if (!localStorage.getItem(`rsdd_comp_${firstCompId}_vouchers`)) {
     const legacyVouchers = localStorage.getItem(STORAGE_KEYS.LEGACY_VOUCHERS);
-    if (legacyVouchers) localStorage.setItem(`rsdd_comp_${defaultId}_vouchers`, legacyVouchers);
+    if (legacyVouchers) localStorage.setItem(`rsdd_comp_${firstCompId}_vouchers`, legacyVouchers);
   }
 
-  const initialList = [{ ...defaultCompany, id: defaultId }];
-  localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(initialList));
-  localStorage.setItem(STORAGE_KEYS.ACTIVE_COMPANY_ID, defaultId);
-  return { companies: initialList, activeId: defaultId };
+  // Save back to master list so it is unified
+  localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(list));
+
+  // Determine active company ID:
+  const savedActiveId = localStorage.getItem(STORAGE_KEYS.ACTIVE_COMPANY_ID);
+  let activeId = savedActiveId && companiesMap.has(savedActiveId) ? savedActiveId : '';
+
+  // Smart preference: if R E enterprises exists, prefer it if activeId was just default comp-1
+  const reCompany = list.find(
+    (c) =>
+      c.companyName.toLowerCase().includes('r e') ||
+      c.companyName.toLowerCase().includes('enterpr')
+  );
+
+  if (!activeId) {
+    activeId = reCompany ? reCompany.id : list[0].id;
+  } else if (activeId === 'comp-1' && reCompany && reCompany.id !== 'comp-1') {
+    activeId = reCompany.id;
+  }
+
+  localStorage.setItem(STORAGE_KEYS.ACTIVE_COMPANY_ID, activeId);
+  return { companies: list, activeId };
 }
 
 const loadCompanyData = (companyId: string) => {
@@ -296,12 +377,13 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     return found || companies[0] || INITIAL_COMPANY_PROFILE;
   }, [companies, activeCompanyId]);
 
-  const [groups, setGroups] = useState<AccountGroup[]>(() => loadCompanyData(initialSetup.activeId).groups);
-  const [ledgers, setLedgers] = useState<AccountLedger[]>(() => loadCompanyData(initialSetup.activeId).ledgers);
-  const [items, setItems] = useState<InventoryItem[]>(() => loadCompanyData(initialSetup.activeId).items);
-  const [vouchers, setVouchers] = useState<Voucher[]>(() => loadCompanyData(initialSetup.activeId).vouchers);
-  const [productions, setProductions] = useState<ProductionEntry[]>(() => loadCompanyData(initialSetup.activeId).productions);
-  const [boms, setBoms] = useState<BillOfMaterial[]>(() => loadCompanyData(initialSetup.activeId).boms);
+  const initialCompanyData = useMemo(() => loadCompanyData(initialSetup.activeId), [initialSetup.activeId]);
+  const [groups, setGroups] = useState<AccountGroup[]>(initialCompanyData.groups);
+  const [ledgers, setLedgers] = useState<AccountLedger[]>(initialCompanyData.ledgers);
+  const [items, setItems] = useState<InventoryItem[]>(initialCompanyData.items);
+  const [vouchers, setVouchers] = useState<Voucher[]>(initialCompanyData.vouchers);
+  const [productions, setProductions] = useState<ProductionEntry[]>(initialCompanyData.productions);
+  const [boms, setBoms] = useState<BillOfMaterial[]>(initialCompanyData.boms);
 
   // Persist companies list and active ID
   useEffect(() => {
@@ -357,6 +439,93 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   }, [boms, activeCompanyId]);
 
+  const { user, setCloudSyncStatus, setLastSyncedAt } = useAuth();
+
+  // Cloud Firestore Sync on Auth Change
+  useEffect(() => {
+    if (!user) return;
+    let isCancelled = false;
+
+    async function syncCloud() {
+      try {
+        setCloudSyncStatus('syncing');
+        const cloudCompanies = await getCloudCompanies(user.uid);
+
+        if (cloudCompanies.length > 0) {
+          // Merge cloud companies with local companies
+          setCompanies((prev) => {
+            const map = new Map<string, CompanyProfile>();
+            prev.forEach((c) => map.set(c.id, c));
+            cloudCompanies.forEach((c) => map.set(c.id, c));
+            const merged = Array.from(map.values());
+            localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(merged));
+            return merged;
+          });
+
+          // Upload any local company that is missing from cloud
+          for (const localComp of companies) {
+            if (!cloudCompanies.some((c) => c.id === localComp.id)) {
+              const localData = loadCompanyData(localComp.id);
+              await batchSyncEntireCompanyToCloud(user.uid, localComp, {
+                vouchers: localData.vouchers,
+                ledgers: localData.ledgers,
+                items: localData.items,
+                groups: localData.groups,
+                boms: localData.boms,
+              });
+            }
+          }
+
+          // Also load current active company's data from cloud if available
+          const cloudCompData = await loadCompanyDataFromCloud(user.uid, activeCompanyId);
+          if (!isCancelled && cloudCompData) {
+            if (cloudCompData.vouchers && cloudCompData.vouchers.length > 0) {
+              setVouchers(cloudCompData.vouchers);
+            }
+            if (cloudCompData.ledgers && cloudCompData.ledgers.length > 0) {
+              setLedgers(cloudCompData.ledgers);
+            }
+            if (cloudCompData.items && cloudCompData.items.length > 0) {
+              setItems(cloudCompData.items);
+            }
+            if (cloudCompData.groups && cloudCompData.groups.length > 0) {
+              setGroups(cloudCompData.groups);
+            }
+            if (cloudCompData.boms && cloudCompData.boms.length > 0) {
+              setBoms(cloudCompData.boms);
+            }
+          }
+        } else {
+          // First time cloud sync: upload all existing local companies and current data to Cloud Firestore!
+          for (const localComp of companies) {
+            const localData = loadCompanyData(localComp.id);
+            await batchSyncEntireCompanyToCloud(user.uid, localComp, {
+              vouchers: localComp.id === activeCompanyId ? vouchers : localData.vouchers,
+              ledgers: localComp.id === activeCompanyId ? ledgers : localData.ledgers,
+              items: localComp.id === activeCompanyId ? items : localData.items,
+              groups: localComp.id === activeCompanyId ? groups : localData.groups,
+              boms: localComp.id === activeCompanyId ? boms : localData.boms,
+            });
+          }
+        }
+
+        if (!isCancelled) {
+          setCloudSyncStatus('synced');
+          setLastSyncedAt(new Date());
+        }
+      } catch (err) {
+        console.error('Cloud sync error:', err);
+        if (!isCancelled) setCloudSyncStatus('error');
+      }
+    }
+
+    syncCloud();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [user?.uid]);
+
   // Switch Company
   const switchCompany = (targetCompanyId: string) => {
     if (targetCompanyId === activeCompanyId) return;
@@ -372,6 +541,19 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     setVouchers(data.vouchers);
     setProductions(data.productions);
     setBoms(data.boms);
+
+    // Also fetch latest from cloud for this switched company
+    if (user) {
+      loadCompanyDataFromCloud(user.uid, targetCompanyId).then((cloudData) => {
+        if (cloudData) {
+          if (cloudData.vouchers && cloudData.vouchers.length > 0) setVouchers(cloudData.vouchers);
+          if (cloudData.ledgers && cloudData.ledgers.length > 0) setLedgers(cloudData.ledgers);
+          if (cloudData.items && cloudData.items.length > 0) setItems(cloudData.items);
+          if (cloudData.groups && cloudData.groups.length > 0) setGroups(cloudData.groups);
+          if (cloudData.boms && cloudData.boms.length > 0) setBoms(cloudData.boms);
+        }
+      });
+    }
   };
 
   // Create Company
@@ -391,9 +573,12 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     localStorage.setItem(`rsdd_comp_${newId}_vouchers`, JSON.stringify([]));
     localStorage.setItem(`rsdd_comp_${newId}_productions`, JSON.stringify([]));
     localStorage.setItem(`rsdd_comp_${newId}_boms`, JSON.stringify([]));
+    localStorage.setItem(`rsdd_comp_${newId}_profile`, JSON.stringify(newCompany));
 
     const updatedCompanies = [...companies, newCompany];
     setCompanies(updatedCompanies);
+    localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(updatedCompanies));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_COMPANY_ID, newId);
 
     // Switch to new company
     setActiveCompanyId(newId);
@@ -404,14 +589,37 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     setProductions([]);
     setBoms([]);
 
+    // Persist to Cloud Firestore
+    if (user) {
+      saveCompanyToCloud(user.uid, newCompany);
+      batchSyncEntireCompanyToCloud(user.uid, newCompany, {
+        vouchers: [],
+        ledgers: INITIAL_LEDGERS,
+        items: [],
+        groups: INITIAL_GROUPS,
+        boms: [],
+      });
+      setLastSyncedAt(new Date());
+    }
+
     return newCompany;
   };
 
   // Update Company
   const updateCompany = (id: string, profileData: Partial<CompanyProfile>) => {
-    setCompanies((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...profileData } : c))
-    );
+    setCompanies((prev) => {
+      const updated = prev.map((c) => (c.id === id ? { ...c, ...profileData } : c));
+      localStorage.setItem(STORAGE_KEYS.COMPANIES, JSON.stringify(updated));
+      const target = updated.find((c) => c.id === id);
+      if (target) {
+        localStorage.setItem(`rsdd_comp_${id}_profile`, JSON.stringify(target));
+        if (user) {
+          saveCompanyToCloud(user.uid, target);
+          setLastSyncedAt(new Date());
+        }
+      }
+      return updated;
+    });
   };
 
   // Delete Company
@@ -448,6 +656,11 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       setBoms(data.boms);
     }
 
+    if (user) {
+      deleteCompanyFromCloud(user.uid, id);
+      setLastSyncedAt(new Date());
+    }
+
     return { success: true };
   };
 
@@ -457,91 +670,88 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Recalculate stock and ledger balances dynamically
   const calculatedLedgers = useMemo(() => {
+    // Fast O(V) single pass pre-aggregation of balance adjustments
+    const ledgerDeltaMap = new Map<string, number>();
+    const addDelta = (id: string, amt: number) => {
+      if (!id || !amt || isNaN(amt)) return;
+      ledgerDeltaMap.set(id, (ledgerDeltaMap.get(id) || 0) + amt);
+    };
+
+    const cgstLedger = ledgers.find(isCgstLedger);
+    const sgstLedger = ledgers.find(isSgstLedger);
+    const igstLedger = ledgers.find(isIgstLedger);
+
+    for (let i = 0; i < vouchers.length; i++) {
+      const v = vouchers[i];
+
+      // 1. Handle Double Entry Mode Vouchers
+      if (v.entryMode === 'DOUBLE' && v.doubleEntries && v.doubleEntries.length > 0) {
+        for (let j = 0; j < v.doubleEntries.length; j++) {
+          const entry = v.doubleEntries[j];
+          if (entry.ledgerId && entry.amount) {
+            const amt = Number(entry.amount) || 0;
+            addDelta(entry.ledgerId, entry.type === 'Dr' ? amt : -amt);
+          }
+        }
+        continue;
+      }
+
+      // 2. Handle Single Entry / Standard Vouchers
+      const gTotal = Number(v.grandTotal) || 0;
+
+      // GST tax distribution
+      if (cgstLedger && (v.cgstTotal || 0) > 0) {
+        const cgstAmt = Number(v.cgstTotal) || 0;
+        if (v.type === 'SALE') addDelta(cgstLedger.id, -cgstAmt);
+        else if (v.type === 'PURCHASE') addDelta(cgstLedger.id, cgstAmt);
+      }
+      if (sgstLedger && (v.sgstTotal || 0) > 0) {
+        const sgstAmt = Number(v.sgstTotal) || 0;
+        if (v.type === 'SALE') addDelta(sgstLedger.id, -sgstAmt);
+        else if (v.type === 'PURCHASE') addDelta(sgstLedger.id, sgstAmt);
+      }
+      if (igstLedger && (v.igstTotal || 0) > 0) {
+        const igstAmt = Number(v.igstTotal) || 0;
+        if (v.type === 'SALE') addDelta(igstLedger.id, -igstAmt);
+        else if (v.type === 'PURCHASE') addDelta(igstLedger.id, igstAmt);
+      }
+
+      // Party Ledger
+      if (v.partyLedgerId) {
+        if (v.type === 'SALE') {
+          addDelta(v.partyLedgerId, gTotal);
+        } else if (v.type === 'RECEIPT') {
+          addDelta(v.partyLedgerId, -gTotal);
+        } else if (v.type === 'PURCHASE') {
+          addDelta(v.partyLedgerId, -gTotal);
+        } else if (v.type === 'PAYMENT') {
+          addDelta(v.partyLedgerId, gTotal);
+        } else if (v.type === 'CONTRA') {
+          addDelta(v.partyLedgerId, -gTotal);
+        } else if (v.type === 'JOURNAL') {
+          addDelta(v.partyLedgerId, gTotal);
+        }
+      }
+
+      // Payment / Bank / Cash Ledger
+      if (v.paymentLedgerId) {
+        if (v.type === 'RECEIPT' || (v.type === 'SALE' && v.paymentMode !== 'CREDIT')) {
+          addDelta(v.paymentLedgerId, gTotal);
+        } else if (v.type === 'PAYMENT' || (v.type === 'PURCHASE' && v.paymentMode !== 'CREDIT')) {
+          addDelta(v.paymentLedgerId, -gTotal);
+        } else if (v.type === 'CONTRA') {
+          addDelta(v.paymentLedgerId, gTotal);
+        } else if (v.type === 'JOURNAL') {
+          addDelta(v.paymentLedgerId, -gTotal);
+        }
+      }
+    }
+
     return ledgers.map((ledger) => {
-      const isCgst = isCgstLedger(ledger);
-      const isSgst = isSgstLedger(ledger);
-      const isIgst = isIgstLedger(ledger);
-
-      let balance = ledger.openingBalanceType === 'Dr' ? ledger.openingBalance : -ledger.openingBalance;
-
-      vouchers.forEach((v) => {
-        // 1. Handle Double Entry Mode Vouchers
-        if (v.entryMode === 'DOUBLE' && v.doubleEntries && v.doubleEntries.length > 0) {
-          v.doubleEntries.forEach((entry) => {
-            if (entry.ledgerId === ledger.id) {
-              if (entry.type === 'Dr') {
-                balance += entry.amount; // Debit adds to positive (Dr)
-              } else if (entry.type === 'Cr') {
-                balance -= entry.amount; // Credit subtracts from positive (Cr)
-              }
-            }
-          });
-          return;
-        }
-
-        // 2. Handle Single Entry / Standard Vouchers
-        if (isCgst || isSgst || isIgst) {
-          // GST Ledger calculation:
-          // SALE -> Output Tax Credit (liability increases => -)
-          // PURCHASE -> Input Tax Debit (ITC increases => +)
-          // PAYMENT -> Tax Paid Debit (+); RECEIPT -> Tax Refund Credit (-)
-          let taxAmt = 0;
-          if (isCgst) taxAmt = v.cgstTotal || 0;
-          else if (isSgst) taxAmt = v.sgstTotal || 0;
-          else if (isIgst) taxAmt = v.igstTotal || 0;
-
-          if (v.type === 'SALE' && taxAmt > 0) {
-            balance -= taxAmt; // Credit (Liability)
-          } else if (v.type === 'PURCHASE' && taxAmt > 0) {
-            balance += taxAmt; // Debit (Input Tax Credit)
-          }
-
-          if (v.partyLedgerId === ledger.id) {
-            if (v.type === 'PAYMENT') {
-              balance += v.grandTotal;
-            } else if (v.type === 'RECEIPT') {
-              balance -= v.grandTotal;
-            } else if (v.type === 'JOURNAL') {
-              balance += v.grandTotal;
-            }
-          }
-
-          if (v.paymentLedgerId === ledger.id) {
-            if (v.type === 'JOURNAL') {
-              balance -= v.grandTotal;
-            }
-          }
-        } else {
-          if (v.partyLedgerId === ledger.id) {
-            if (v.type === 'SALE') {
-              balance += v.grandTotal; // Debited (Customer owes more)
-            } else if (v.type === 'RECEIPT') {
-              balance -= v.grandTotal; // Credited (Customer paid)
-            } else if (v.type === 'PURCHASE') {
-              balance -= v.grandTotal; // Credited (We owe vendor more)
-            } else if (v.type === 'PAYMENT') {
-              balance += v.grandTotal; // Debited (Vendor paid / expense paid)
-            } else if (v.type === 'CONTRA') {
-              balance -= v.grandTotal; // Credited (Paid from / Outflow)
-            } else if (v.type === 'JOURNAL') {
-              balance += v.grandTotal; // Debited
-            }
-          }
-
-          if (v.paymentLedgerId === ledger.id) {
-            if (v.type === 'RECEIPT' || (v.type === 'SALE' && v.paymentMode !== 'CREDIT')) {
-              balance += v.grandTotal; // Bank / Cash inflow
-            } else if (v.type === 'PAYMENT' || (v.type === 'PURCHASE' && v.paymentMode !== 'CREDIT')) {
-              balance -= v.grandTotal; // Bank / Cash outflow
-            } else if (v.type === 'CONTRA') {
-              balance += v.grandTotal; // Deposit to / Inflow
-            } else if (v.type === 'JOURNAL') {
-              balance -= v.grandTotal; // Credit ledger
-            }
-          }
-        }
-      });
-
+      const openBal = Number(ledger.openingBalance) || 0;
+      const baseBalance = ledger.openingBalanceType === 'Dr' ? openBal : -openBal;
+      const delta = ledgerDeltaMap.get(ledger.id) || 0;
+      const balance = baseBalance + delta;
       const currentBalanceType: BalanceType = balance >= 0 ? 'Dr' : 'Cr';
       return {
         ...ledger,
@@ -553,36 +763,49 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Calculated Items stock (considering Opening Stock, Sales, Purchases, and Production Consumption/Output)
   const calculatedItems = useMemo(() => {
-    return items.map((item) => {
-      let stock = item.openingStock || 0;
+    // Fast O(V + P) single pass stock delta aggregation
+    const itemStockDelta = new Map<string, number>();
+    const addStockDelta = (id: string, qty: number) => {
+      if (!id || !qty || isNaN(qty)) return;
+      itemStockDelta.set(id, (itemStockDelta.get(id) || 0) + qty);
+    };
 
-      // 1. Invoices & Sales / Purchases
-      vouchers.forEach((v) => {
-        v.items?.forEach((vi) => {
-          if (vi.itemId === item.id) {
-            if (v.type === 'SALE') {
-              stock -= vi.quantity;
-            } else if (v.type === 'PURCHASE') {
-              stock += vi.quantity;
+    for (let i = 0; i < vouchers.length; i++) {
+      const v = vouchers[i];
+      if (v.items && v.items.length > 0) {
+        const isSale = v.type === 'SALE';
+        const isPurchase = v.type === 'PURCHASE';
+        if (isSale || isPurchase) {
+          for (let j = 0; j < v.items.length; j++) {
+            const vi = v.items[j];
+            if (vi.itemId) {
+              const q = Number(vi.quantity) || 0;
+              addStockDelta(vi.itemId, isSale ? -q : q);
             }
           }
-        });
-      });
-
-      // 2. Manufacturing / Production Entries
-      productions.forEach((pe) => {
-        // Finished Good manufactured -> stock increases
-        if (pe.finishedItemId === item.id) {
-          stock += Number(pe.outputQuantity) || 0;
         }
-        // Raw Material consumed -> stock decreases
-        pe.rawMaterials?.forEach((rm) => {
-          if (rm.itemId === item.id) {
-            stock -= Number(rm.quantity) || 0;
-          }
-        });
-      });
+      }
+    }
 
+    for (let i = 0; i < productions.length; i++) {
+      const pe = productions[i];
+      if (pe.finishedItemId) {
+        addStockDelta(pe.finishedItemId, Number(pe.outputQuantity) || 0);
+      }
+      if (pe.rawMaterials && pe.rawMaterials.length > 0) {
+        for (let j = 0; j < pe.rawMaterials.length; j++) {
+          const rm = pe.rawMaterials[j];
+          if (rm.itemId) {
+            addStockDelta(rm.itemId, -(Number(rm.quantity) || 0));
+          }
+        }
+      }
+    }
+
+    return items.map((item) => {
+      const openStock = Number(item.openingStock) || 0;
+      const delta = itemStockDelta.get(item.id) || 0;
+      const stock = openStock + delta;
       return {
         ...item,
         currentStock: Math.round(stock * 100) / 100,
@@ -598,12 +821,26 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       createdAt: getTodayDateString(),
     };
     setGroups((prev) => [...prev, newGroup]);
+    if (user) {
+      saveGroupToCloud(user.uid, activeCompanyId, newGroup);
+      setLastSyncedAt(new Date());
+    }
     return newGroup;
   };
 
   const updateGroup = (id: string, groupData: Partial<AccountGroup>) => {
     setGroups((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, ...groupData, updatedAt: getTodayDateString() } : g))
+      prev.map((g) => {
+        if (g.id === id) {
+          const updated = { ...g, ...groupData, updatedAt: getTodayDateString() };
+          if (user) {
+            saveGroupToCloud(user.uid, activeCompanyId, updated);
+            setLastSyncedAt(new Date());
+          }
+          return updated;
+        }
+        return g;
+      })
     );
   };
 
@@ -627,11 +864,27 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       createdAt: getTodayDateString(),
     };
     setLedgers((prev) => [...prev, newLedger]);
+    if (user) {
+      saveLedgerToCloud(user.uid, activeCompanyId, newLedger);
+      setLastSyncedAt(new Date());
+    }
     return newLedger;
   };
 
   const updateLedger = (id: string, ledgerData: Partial<AccountLedger>) => {
-    setLedgers((prev) => prev.map((l) => (l.id === id ? { ...l, ...ledgerData } : l)));
+    setLedgers((prev) =>
+      prev.map((l) => {
+        if (l.id === id) {
+          const updated = { ...l, ...ledgerData };
+          if (user) {
+            saveLedgerToCloud(user.uid, activeCompanyId, updated);
+            setLastSyncedAt(new Date());
+          }
+          return updated;
+        }
+        return l;
+      })
+    );
   };
 
   const deleteLedger = (id: string): { success: boolean; message?: string } => {
@@ -640,6 +893,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       return { success: false, message: 'Cannot delete ledger because transactions are recorded for this party/account.' };
     }
     setLedgers((prev) => prev.filter((l) => l.id !== id));
+    if (user) {
+      deleteLedgerFromCloud(user.uid, activeCompanyId, id);
+      setLastSyncedAt(new Date());
+    }
     return { success: true };
   };
 
@@ -654,11 +911,27 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       createdAt: getTodayDateString(),
     };
     setItems((prev) => [...prev, newItem]);
+    if (user) {
+      saveItemToCloud(user.uid, activeCompanyId, newItem);
+      setLastSyncedAt(new Date());
+    }
     return newItem;
   };
 
   const updateItem = (id: string, itemData: Partial<InventoryItem>) => {
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...itemData } : item)));
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          const updated = { ...item, ...itemData };
+          if (user) {
+            saveItemToCloud(user.uid, activeCompanyId, updated);
+            setLastSyncedAt(new Date());
+          }
+          return updated;
+        }
+        return item;
+      })
+    );
   };
 
   const deleteItem = (id: string): { success: boolean; message?: string } => {
@@ -673,6 +946,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       return { success: false, message: 'Cannot delete item because it is referenced in production / manufacturing batches.' };
     }
     setItems((prev) => prev.filter((item) => item.id !== id));
+    if (user) {
+      deleteItemFromCloud(user.uid, activeCompanyId, id);
+      setLastSyncedAt(new Date());
+    }
     return { success: true };
   };
 
@@ -752,26 +1029,40 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
       createdAt: new Date().toISOString(),
     };
     setVouchers((prev) => [newVoucher, ...prev]);
+    if (user) {
+      saveVoucherToCloud(user.uid, activeCompanyId, newVoucher);
+      setLastSyncedAt(new Date());
+    }
     return newVoucher;
   };
 
   const updateVoucher = (id: string, voucherData: Partial<Voucher>) => {
     const party = voucherData.partyLedgerId ? calculatedLedgers.find((l) => l.id === voucherData.partyLedgerId) : undefined;
     setVouchers((prev) =>
-      prev.map((v) =>
-        v.id === id
-          ? {
-              ...v,
-              ...voucherData,
-              partyName: party ? party.name : (voucherData.partyName || v.partyName),
-            }
-          : v
-      )
+      prev.map((v) => {
+        if (v.id === id) {
+          const updated = {
+            ...v,
+            ...voucherData,
+            partyName: party ? party.name : (voucherData.partyName || v.partyName),
+          };
+          if (user) {
+            saveVoucherToCloud(user.uid, activeCompanyId, updated);
+            setLastSyncedAt(new Date());
+          }
+          return updated;
+        }
+        return v;
+      })
     );
   };
 
   const deleteVoucher = (id: string) => {
     setVouchers((prev) => prev.filter((v) => v.id !== id));
+    if (user) {
+      deleteVoucherFromCloud(user.uid, activeCompanyId, id);
+      setLastSyncedAt(new Date());
+    }
   };
 
   // LEDGER STATEMENT GENERATOR
@@ -1756,6 +2047,25 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     localStorage.setItem(`rsdd_comp_${activeCompanyId}_boms`, JSON.stringify(INITIAL_BOMS));
   };
 
+  const forceSyncAllToCloud = async () => {
+    if (!user) return;
+    setCloudSyncStatus('syncing');
+    try {
+      for (const comp of companies) {
+        const isCurrent = comp.id === activeCompanyId;
+        const cData = isCurrent
+          ? { vouchers, ledgers, items, groups, boms }
+          : loadCompanyData(comp.id);
+        await batchSyncEntireCompanyToCloud(user.uid, comp, cData);
+      }
+      setCloudSyncStatus('synced');
+      setLastSyncedAt(new Date());
+    } catch (err) {
+      console.error('Failed to force sync:', err);
+      setCloudSyncStatus('error');
+    }
+  };
+
   return (
     <AccountingContext.Provider
       value={{
@@ -1813,6 +2123,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         exportBackupJson,
         importBackupJson,
         resetToSampleData,
+        forceSyncAllToCloud,
       }}
     >
       {children}

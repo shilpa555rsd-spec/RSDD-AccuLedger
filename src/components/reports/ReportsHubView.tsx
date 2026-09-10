@@ -17,19 +17,17 @@ import {
   FileSpreadsheet,
   FileText,
   Percent,
-  TrendingUp,
   Calendar,
   FileDown,
   Share2,
-  Package,
   Layers,
   CheckCircle2,
-  BookOpen,
   CreditCard,
   CheckCircle,
   AlertCircle,
   Receipt,
   ShieldCheck,
+  ChevronDown,
 } from 'lucide-react';
 
 export const ReportsHubView: React.FC = () => {
@@ -46,16 +44,151 @@ export const ReportsHubView: React.FC = () => {
     companyProfile,
   } = useAccounting();
 
-  // Active Report Tab
+  // Active Report Tab (Default to Balance Sheet)
   const [activeReport, setActiveReport] = useState<
     'ledger' | 'gst' | 'pnl' | 'balancesheet' | 'daybook' | 'stock'
-  >('ledger');
+  >('balancesheet');
 
   // Date filters
   const today = getTodayDateString();
   const { start: fyStart, end: fyEnd } = getFinancialYearDates();
   const [startDate, setStartDate] = useState(fyStart);
   const [endDate, setEndDate] = useState(today);
+  const [periodType, setPeriodType] = useState<
+    'monthly' | 'quarterly' | 'halfyearly' | 'yearly' | 'custom'
+  >('yearly');
+
+  const handlePeriodTypeChange = (
+    type: 'monthly' | 'quarterly' | 'halfyearly' | 'yearly' | 'custom'
+  ) => {
+    setPeriodType(type);
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0-11
+    const currentYear = now.getFullYear();
+
+    const toDateString = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (type === 'monthly') {
+      const start = new Date(currentYear, currentMonth, 1);
+      const end = new Date(currentYear, currentMonth + 1, 0);
+      setStartDate(toDateString(start));
+      setEndDate(toDateString(end));
+    } else if (type === 'quarterly') {
+      // Q1: Apr-Jun (3-5), Q2: Jul-Sep (6-8), Q3: Oct-Dec (9-11), Q4: Jan-Mar (0-2)
+      let qStartMonth = 3;
+      let qYear = currentYear;
+      if (currentMonth >= 3 && currentMonth <= 5) {
+        qStartMonth = 3;
+      } else if (currentMonth >= 6 && currentMonth <= 8) {
+        qStartMonth = 6;
+      } else if (currentMonth >= 9 && currentMonth <= 11) {
+        qStartMonth = 9;
+      } else {
+        qStartMonth = 0;
+      }
+      const start = new Date(qYear, qStartMonth, 1);
+      const end = new Date(qYear, qStartMonth + 3, 0);
+      setStartDate(toDateString(start));
+      setEndDate(toDateString(end));
+    } else if (type === 'halfyearly') {
+      // H1 (Apr-Sep) or H2 (Oct-Mar) in Indian FY
+      let hStartMonth = 3;
+      let hYear = currentYear;
+      if (currentMonth >= 3 && currentMonth <= 8) {
+        hStartMonth = 3; // Apr 1 - Sep 30
+      } else {
+        if (currentMonth < 3) {
+          hYear = currentYear - 1;
+        }
+        hStartMonth = 9; // Oct 1 - Mar 31
+      }
+      const start = new Date(hYear, hStartMonth, 1);
+      const end = new Date(hYear + (hStartMonth === 9 ? 1 : 0), (hStartMonth + 6) % 12, 0);
+      setStartDate(toDateString(start));
+      setEndDate(toDateString(end));
+    } else if (type === 'yearly') {
+      setStartDate(fyStart);
+      setEndDate(fyEnd);
+    }
+  };
+
+  // Dynamic Period Display Labels
+  const currentFyLabel = useMemo(() => {
+    const { start, end } = getFinancialYearDates();
+    const sYear = start.slice(0, 4);
+    const eYear = end.slice(2, 4);
+    return `FY ${sYear}-${eYear}`;
+  }, []);
+
+  const currentMonthLabel = useMemo(() => {
+    const now = new Date();
+    return now.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  }, []);
+
+  const currentQuarterLabel = useMemo(() => {
+    const now = new Date();
+    const m = now.getMonth();
+    const y = now.getFullYear();
+    if (m >= 3 && m <= 5) return `Q1 (Apr - Jun ${y})`;
+    if (m >= 6 && m <= 8) return `Q2 (Jul - Sep ${y})`;
+    if (m >= 9 && m <= 11) return `Q3 (Oct - Dec ${y})`;
+    return `Q4 (Jan - Mar ${y})`;
+  }, []);
+
+  const currentHalfYearLabel = useMemo(() => {
+    const now = new Date();
+    const m = now.getMonth();
+    const y = now.getFullYear();
+    if (m >= 3 && m <= 8) return `H1 (Apr - Sep ${y})`;
+    return `H2 (Oct - Mar ${m < 3 ? y : y + 1})`;
+  }, []);
+
+  // Dynamic Period Display Label
+  const getPeriodLabel = () => {
+    try {
+      if (!startDate) return '';
+      if (periodType === 'yearly') {
+        const sYear = startDate.slice(0, 4);
+        const eYear = endDate ? endDate.slice(2, 4) : '';
+        return eYear ? `FY ${sYear}-${eYear}` : `FY ${sYear}`;
+      }
+      if (periodType === 'monthly') {
+        const parts = startDate.split('-');
+        if (parts.length >= 2) {
+          const d = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+          return d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+        }
+      }
+      if (periodType === 'quarterly') {
+        const parts = startDate.split('-');
+        if (parts.length >= 2) {
+          const m = Number(parts[1]) - 1;
+          const y = Number(parts[0]);
+          if (m >= 3 && m <= 5) return `Q1 (Apr - Jun ${y})`;
+          if (m >= 6 && m <= 8) return `Q2 (Jul - Sep ${y})`;
+          if (m >= 9 && m <= 11) return `Q3 (Oct - Dec ${y})`;
+          return `Q4 (Jan - Mar ${y})`;
+        }
+      }
+      if (periodType === 'halfyearly') {
+        const parts = startDate.split('-');
+        if (parts.length >= 2) {
+          const m = Number(parts[1]) - 1;
+          const y = Number(parts[0]);
+          if (m >= 3 && m <= 8) return `H1 (Apr - Sep ${y})`;
+          return `H2 (Oct - Mar ${y + 1})`;
+        }
+      }
+    } catch {
+      return '';
+    }
+    return '';
+  };
 
   // Selected Ledger for Statement
   const [selectedLedgerId, setSelectedLedgerId] = useState<string>(ledgers[0]?.id || '');
@@ -158,149 +291,141 @@ export const ReportsHubView: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-20 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-2">
-            <FileSpreadsheet className="w-6 h-6 text-amber-500" />
-            <span>Reports & Statements (रिपोर्ट एवं विवरण)</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500">
-            Download and Share Ledger Statements, GST GSTR-1 / 3B, P&L, and Balance Sheet in PDF
-          </p>
+      {/* Header: Reports & Statements and Dropdown in a single straight line side-by-side */}
+      <div className="flex items-center gap-2.5 sm:gap-4 flex-nowrap overflow-x-auto no-scrollbar py-0.5">
+        <h1 className="text-lg sm:text-2xl font-black text-slate-900 flex items-center gap-2 whitespace-nowrap shrink-0">
+          <FileSpreadsheet className="w-5 h-5 sm:w-6 sm:h-6 text-amber-500 shrink-0" />
+          <span>Reports & Statements</span>
+        </h1>
+
+        {/* Report Dropdown Selector */}
+        <div className="relative inline-flex items-center shrink-0">
+          <select
+            id="report-select-dropdown"
+            value={activeReport}
+            onChange={(e) =>
+              setActiveReport(
+                e.target.value as
+                  | 'ledger'
+                  | 'gst'
+                  | 'pnl'
+                  | 'balancesheet'
+                  | 'daybook'
+                  | 'stock'
+              )
+            }
+            className="appearance-none bg-white hover:bg-amber-50/50 text-slate-900 border-2 border-amber-400 font-extrabold text-xs sm:text-sm rounded-xl pl-3 pr-8 sm:pr-9 py-1.5 sm:py-2 shadow-xs focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer transition whitespace-nowrap"
+          >
+            <option value="balancesheet">Balance Sheet</option>
+            <option value="ledger">Ledger Statement</option>
+            <option value="gst">GST Reports (GSTR-1 / 3B)</option>
+            <option value="pnl">Profit & Loss (P&L)</option>
+            <option value="daybook">Day Book</option>
+            <option value="stock">Stock Summary</option>
+          </select>
+          <ChevronDown className="w-4 h-4 text-amber-600 pointer-events-none absolute right-2 sm:right-2.5 shrink-0" />
         </div>
-      </div>
-
-      {/* Report Navigation Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto p-1.5 bg-slate-100/90 border border-slate-200 rounded-2xl text-xs font-bold no-scrollbar">
-        <button
-          onClick={() => setActiveReport('ledger')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap ${
-            activeReport === 'ledger'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <FileText className="w-4 h-4 text-amber-400" />
-          <span>Ledger Statement</span>
-        </button>
-
-        <button
-          onClick={() => setActiveReport('gst')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap ${
-            activeReport === 'gst'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <Percent className="w-4 h-4 text-emerald-400" />
-          <span>GST Reports (GSTR-1 / 3B)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveReport('pnl')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap ${
-            activeReport === 'pnl'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <TrendingUp className="w-4 h-4 text-blue-400" />
-          <span>Profit & Loss (P&L)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveReport('balancesheet')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap ${
-            activeReport === 'balancesheet'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <Layers className="w-4 h-4 text-purple-400" />
-          <span>Balance Sheet</span>
-        </button>
-
-        <button
-          onClick={() => setActiveReport('daybook')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap ${
-            activeReport === 'daybook'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <BookOpen className="w-4 h-4 text-orange-400" />
-          <span>Day Book</span>
-        </button>
-
-        <button
-          onClick={() => setActiveReport('stock')}
-          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap ${
-            activeReport === 'stock'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-700 hover:bg-slate-200'
-          }`}
-        >
-          <Package className="w-4 h-4 text-rose-400" />
-          <span>Stock Summary</span>
-        </button>
       </div>
 
       {/* Global Date Filter Bar (Single Straight Horizontal Line) */}
       {activeReport !== 'daybook' && (
         <div className="p-3 bg-white border border-slate-200 rounded-2xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-xs text-xs">
-          {/* Straight horizontal line for From Date and To Date */}
+          {/* Straight horizontal line for Period label, Dropdown, and From/To Dates */}
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <span className="font-extrabold text-slate-700 flex items-center gap-1 shrink-0">
               <Calendar className="w-4 h-4 text-sky-600" /> Period:
             </span>
-            
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">From:</span>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="border-none bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
-                />
-              </div>
 
-              <span className="text-slate-400 font-bold text-xs">to</span>
-
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">To:</span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="border-none bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
-                />
-              </div>
+            {/* Side-by-side Period Dropdown Selector */}
+            <div className="relative inline-flex items-center shrink-0">
+              <select
+                id="period-select-dropdown"
+                value={periodType}
+                onChange={(e) =>
+                  handlePeriodTypeChange(
+                    e.target.value as
+                      | 'monthly'
+                      | 'quarterly'
+                      | 'halfyearly'
+                      | 'yearly'
+                      | 'custom'
+                  )
+                }
+                className="appearance-none bg-slate-50 hover:bg-slate-100 text-slate-900 border border-slate-300 font-extrabold text-xs rounded-xl pl-3 pr-8 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer transition shadow-2xs"
+              >
+                <option value="yearly">Yearly ({currentFyLabel})</option>
+                <option value="monthly">Monthly ({currentMonthLabel})</option>
+                <option value="quarterly">Quarterly ({currentQuarterLabel})</option>
+                <option value="halfyearly">Half Yearly ({currentHalfYearLabel})</option>
+                <option value="custom">Custom Date Range</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-500 pointer-events-none absolute right-2.5 shrink-0" />
             </div>
-          </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => {
-                const d = new Date();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                setStartDate(`${d.getFullYear()}-${m}-01`);
-                setEndDate(today);
-              }}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-slate-700 text-xs transition"
-            >
-              This Month
-            </button>
-            <button
-              onClick={() => {
-                setStartDate(fyStart);
-                setEndDate(today);
-              }}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-slate-700 text-xs transition"
-            >
-              Full FY
-            </button>
+            {/* Dynamic Period Label Badge */}
+            {periodType !== 'custom' && (
+              <span className="text-xs font-black text-amber-950 bg-amber-100/90 border border-amber-300/80 px-2.5 py-1 rounded-xl shrink-0 shadow-2xs tracking-wide">
+                {getPeriodLabel()}
+              </span>
+            )}
+
+            {/* Month Picker: allows picking any specific month when Monthly is selected */}
+            {periodType === 'monthly' && (
+              <div className="flex items-center gap-1.5 bg-amber-50/80 border border-amber-300 rounded-xl px-2.5 py-1 shadow-2xs">
+                <span className="text-[10px] font-black uppercase text-amber-800 tracking-wider">Select Month:</span>
+                <input
+                  type="month"
+                  id="report-month-picker"
+                  value={startDate.slice(0, 7)}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const [yStr, mStr] = e.target.value.split('-');
+                    const y = parseInt(yStr, 10);
+                    const m = parseInt(mStr, 10);
+                    const start = new Date(y, m - 1, 1);
+                    const end = new Date(y, m, 0);
+                    const toStr = (d: Date) => {
+                      const yyyy = d.getFullYear();
+                      const mm = String(d.getMonth() + 1).padStart(2, '0');
+                      const dd = String(d.getDate()).padStart(2, '0');
+                      return `${yyyy}-${mm}-${dd}`;
+                    };
+                    setStartDate(toStr(start));
+                    setEndDate(toStr(end));
+                  }}
+                  className="border-none bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
+                />
+              </div>
+            )}
+            
+            {/* Date to Date Picker: Opens ONLY when Custom is selected */}
+            {periodType === 'custom' && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 bg-amber-50/80 border border-amber-300 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase text-amber-800 tracking-wider">From:</span>
+                  <input
+                    type="date"
+                    id="custom-start-date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="border-none bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
+                  />
+                </div>
+
+                <span className="text-slate-400 font-bold text-xs">to</span>
+
+                <div className="flex items-center gap-1.5 bg-amber-50/80 border border-amber-300 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase text-amber-800 tracking-wider">To:</span>
+                  <input
+                    type="date"
+                    id="custom-end-date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="border-none bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

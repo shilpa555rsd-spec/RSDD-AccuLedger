@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AuthProvider } from './context/AuthContext';
 import { AccountingProvider, useAccounting } from './context/AccountingContext';
 import { Navbar } from './components/layout/Navbar';
 import { BottomNav } from './components/layout/BottomNav';
@@ -191,7 +192,7 @@ const MainAppContent: React.FC = () => {
       {/* Bottom Navigation for mobile screens */}
       <BottomNav
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={(tab) => setActiveTab(tab as NavigationTab)}
         onOpenQuickAdd={() => handleOpenNewVoucher('SALE')}
       />
 
@@ -324,9 +325,11 @@ const MainAppContent: React.FC = () => {
 
 export function App() {
   return (
-    <AccountingProvider>
-      <MainAppContent />
-    </AccountingProvider>
+    <AuthProvider>
+      <AccountingProvider>
+        <MainAppContent />
+      </AccountingProvider>
+    </AuthProvider>
   );
 }
 

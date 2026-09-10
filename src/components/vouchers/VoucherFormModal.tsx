@@ -682,18 +682,15 @@ export const VoucherFormModal: React.FC<VoucherFormModalProps> = ({
       const effectivePartyId = drLines[0]?.ledgerId || populatedDoubleEntries[0]?.ledgerId || '';
       const effectivePaymentId = crLines[0]?.ledgerId || undefined;
 
-      const payload = {
+      const payload: Omit<Voucher, 'id' | 'createdAt'> = {
         voucherNumber: voucherNumber.trim(),
         type,
         date,
-        dueDate: dueDate || undefined,
         partyLedgerId: effectivePartyId,
-        paymentLedgerId: effectivePaymentId,
         paymentMode,
-        referenceNo: referenceNo.trim() || undefined,
         stateOfSupply,
         isInterState,
-        entryMode: 'DOUBLE' as const,
+        entryMode: 'DOUBLE',
         doubleEntries: populatedDoubleEntries,
         items: [],
         subtotal: totalDr,
@@ -705,8 +702,12 @@ export const VoucherFormModal: React.FC<VoucherFormModalProps> = ({
         totalGst: 0,
         roundOff: 0,
         grandTotal: totalDr,
-        narration: narration.trim() || undefined,
       };
+
+      if (dueDate) payload.dueDate = dueDate;
+      if (effectivePaymentId) payload.paymentLedgerId = effectivePaymentId;
+      if (referenceNo.trim()) payload.referenceNo = referenceNo.trim();
+      if (narration.trim()) payload.narration = narration.trim();
 
       try {
         if (voucherToEdit) {
@@ -744,6 +745,7 @@ export const VoucherFormModal: React.FC<VoucherFormModalProps> = ({
           name: partySearchText.trim(),
           groupId: defaultGroup,
           openingBalance: 0,
+          openingBalanceType: type === 'PURCHASE' ? 'Cr' : 'Dr',
           currentBalance: 0,
           currentBalanceType: type === 'PURCHASE' ? 'Cr' : 'Dr',
           state: stateOfSupply,
@@ -770,19 +772,15 @@ export const VoucherFormModal: React.FC<VoucherFormModalProps> = ({
     setIsSaving(true);
     setError(null);
 
-    const payload = {
+    const payload: Omit<Voucher, 'id' | 'createdAt'> = {
       voucherNumber: voucherNumber.trim(),
       type,
       date,
-      dueDate: dueDate || undefined,
       partyLedgerId: effectivePartyId,
-      paymentLedgerId: paymentLedgerId || undefined,
       paymentMode,
-      referenceNo: referenceNo.trim() || undefined,
       stateOfSupply,
       isInterState,
-      entryMode: 'SINGLE' as const,
-      doubleEntries: undefined,
+      entryMode: 'SINGLE',
       items: type === 'SALE' || type === 'PURCHASE' ? voucherItems : [],
       subtotal: totals.subtotal,
       totalDiscount: 0,
@@ -793,8 +791,12 @@ export const VoucherFormModal: React.FC<VoucherFormModalProps> = ({
       totalGst: totals.totalGst,
       roundOff: totals.roundOff,
       grandTotal: totals.grandTotal,
-      narration: narration.trim() || undefined,
     };
+
+    if (dueDate) payload.dueDate = dueDate;
+    if (paymentLedgerId) payload.paymentLedgerId = paymentLedgerId;
+    if (referenceNo.trim()) payload.referenceNo = referenceNo.trim();
+    if (narration.trim()) payload.narration = narration.trim();
 
     try {
       if (voucherToEdit) {

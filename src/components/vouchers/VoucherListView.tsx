@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useAccounting } from '../../context/AccountingContext';
 import { Voucher, VoucherType } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -22,6 +22,9 @@ import {
   ChevronDown,
   X,
   PlusCircle,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 interface VoucherListViewProps {
@@ -41,6 +44,8 @@ export const VoucherListView: React.FC<VoucherListViewProps> = ({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  // Default sort: 'asc' (01/04/26 on top, earlier dates first)
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   const voucherTypeList: Array<{
     type: VoucherType;
@@ -131,6 +136,22 @@ export const VoucherListView: React.FC<VoucherListViewProps> = ({
 
     return matchesType && matchesSearch && matchesStart && matchesEnd;
   });
+
+  // Arrange vouchers strictly by Voucher Date: 01/04/2026 upar, uske bad niche (ascending)
+  const sortedVouchers = useMemo(() => {
+    return [...filteredVouchers].sort((a, b) => {
+      const dateA = a.date || '';
+      const dateB = b.date || '';
+      const dateComp = dateA.localeCompare(dateB);
+      if (dateComp !== 0) {
+        return sortOrder === 'asc' ? dateComp : -dateComp;
+      }
+      // If dates match, sort by voucher number
+      return sortOrder === 'asc'
+        ? (a.voucherNumber || '').localeCompare(b.voucherNumber || '', undefined, { numeric: true })
+        : (b.voucherNumber || '').localeCompare(a.voucherNumber || '', undefined, { numeric: true });
+    });
+  }, [filteredVouchers, sortOrder]);
 
   const handleDelete = (vch: Voucher) => {
     if (confirm(`Are you sure you want to delete ${vch.type} voucher "${vch.voucherNumber}"?`)) {
@@ -318,29 +339,44 @@ export const VoucherListView: React.FC<VoucherListViewProps> = ({
           </div>
         </div>
 
-        {/* Voucher Type Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-          {[
-            { id: 'all', label: `All Vouchers (${vouchers.length})` },
-            { id: 'SALE', label: 'Sale Invoices' },
-            { id: 'PURCHASE', label: 'Purchase Bills' },
-            { id: 'RECEIPT', label: 'Receipts' },
-            { id: 'PAYMENT', label: 'Payments' },
-            { id: 'JOURNAL', label: 'Journal (Dr/Cr)' },
-            { id: 'CONTRA', label: 'Contra' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setSelectedType(tab.id)}
-              className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition ${
-                selectedType === tab.id
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* Voucher Type Pills & Date Order Toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            {[
+              { id: 'all', label: `All Vouchers (${vouchers.length})` },
+              { id: 'SALE', label: 'Sale Invoices' },
+              { id: 'PURCHASE', label: 'Purchase Bills' },
+              { id: 'RECEIPT', label: 'Receipts' },
+              { id: 'PAYMENT', label: 'Payments' },
+              { id: 'JOURNAL', label: 'Journal (Dr/Cr)' },
+              { id: 'CONTRA', label: 'Contra' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedType(tab.id)}
+                className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition ${
+                  selectedType === tab.id
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort order toggle button */}
+          <button
+            type="button"
+            onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+            className="self-start sm:self-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-amber-300/80 bg-amber-50 hover:bg-amber-100 text-slate-900 font-extrabold text-xs shrink-0 transition cursor-pointer shadow-2xs"
+            title="Click to toggle Date Sort Order"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5 text-amber-700" />
+            <span>
+              Date Order: {sortOrder === 'asc' ? '01/04/... Upar (Ascending)' : 'Newest First (Descending)'}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -350,7 +386,26 @@ export const VoucherListView: React.FC<VoucherListViewProps> = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider">
-                <th className="py-3 px-3.5">Date</th>
+                <th
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="py-3 px-3.5 cursor-pointer hover:bg-slate-200 transition select-none group"
+                  title="Click to change date sort order"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>Date</span>
+                    {sortOrder === 'asc' ? (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-amber-200 text-amber-950 border border-amber-300">
+                        <ArrowUp className="w-2.5 h-2.5 stroke-[3]" />
+                        01/04/... First
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-800">
+                        <ArrowDown className="w-2.5 h-2.5 stroke-[3]" />
+                        Latest First
+                      </span>
+                    )}
+                  </div>
+                </th>
                 <th className="py-3 px-3">Vch No.</th>
                 <th className="py-3 px-3">Type</th>
                 <th className="py-3 px-3">Party Name</th>
@@ -361,7 +416,7 @@ export const VoucherListView: React.FC<VoucherListViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-800">
-              {filteredVouchers.length === 0 ? (
+              {sortedVouchers.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-400">
                     <ReceiptText className="w-10 h-10 mx-auto mb-2 text-slate-300" />
@@ -372,7 +427,7 @@ export const VoucherListView: React.FC<VoucherListViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredVouchers.map((vch) => {
+                sortedVouchers.map((vch) => {
                   const badge = getTypeBadge(vch.type);
                   const Icon = badge.icon;
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useAccounting } from '../../context/AccountingContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import {
@@ -60,13 +60,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   } = useAccounting();
 
   // Recent 6 transactions
-  const recentVouchers = [...vouchers].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+  const recentVouchers = useMemo(() => {
+    return [...vouchers]
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .slice(0, 6);
+  }, [vouchers]);
 
   // Top 4 Debtors (Customers to collect money from)
-  const topDebtors = ledgers
-    .filter((l) => l.groupId.includes('debtor') && l.currentBalance > 0)
-    .sort((a, b) => b.currentBalance - a.currentBalance)
-    .slice(0, 4);
+  const topDebtors = useMemo(() => {
+    return ledgers
+      .filter((l) => (l.groupId || '').includes('debtor') && (Number(l.currentBalance) || 0) > 0)
+      .sort((a, b) => (Number(b.currentBalance) || 0) - (Number(a.currentBalance) || 0))
+      .slice(0, 4);
+  }, [ledgers]);
 
   return (
     <div className="space-y-4 pb-20 max-w-7xl mx-auto">

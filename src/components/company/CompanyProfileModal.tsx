@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAccounting } from '../../context/AccountingContext';
+import { useAuth } from '../../context/AuthContext';
 import { CompanyProfile } from '../../types';
 import { INDIAN_STATES } from '../../utils/formatters';
+import { AuthModal } from '../auth/AuthModal';
 import {
   Building2,
   X,
@@ -16,6 +18,13 @@ import {
   Database,
   Download,
   Upload,
+  User,
+  Cloud,
+  CheckCircle2,
+  RefreshCw,
+  AlertCircle,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface CompanyProfileModalProps {
@@ -36,12 +45,23 @@ export const CompanyProfileModal: React.FC<CompanyProfileModalProps> = ({
   onOpenCompanyManager,
   onOpenBackup,
 }) => {
-  const { companyProfile, updateCompany, updateCompanyProfile, companies, activeCompanyId, switchCompany } = useAccounting();
+  const {
+    companyProfile,
+    updateCompany,
+    updateCompanyProfile,
+    companies,
+    activeCompanyId,
+    switchCompany,
+    forceSyncAllToCloud,
+  } = useAccounting();
+  const { user, cloudSyncStatus, lastSyncedAt, logout } = useAuth();
   
   // Track currently selected company in settings to view/alter
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(activeCompanyId);
   const [formData, setFormData] = useState<CompanyProfile>(companyProfile);
   const [isSaved, setIsSaved] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -305,7 +325,132 @@ export const CompanyProfileModal: React.FC<CompanyProfileModalProps> = ({
           </div>
         </div>
 
-        {/* 3. Company Alter / Modification Form */}
+        {/* 3. Cloud Login & Multi-Device Sync Card */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black shadow-md shrink-0 ${
+                  user
+                    ? 'bg-gradient-to-tr from-emerald-500 to-teal-600 text-white'
+                    : 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white'
+                }`}
+              >
+                {user ? <ShieldCheck className="w-6 h-6" /> : <User className="w-6 h-6" />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-extrabold text-slate-900 text-base sm:text-lg">
+                    Cloud Account & Sync (क्लाउड अकाउंट एवं लॉगिन)
+                  </h3>
+                  {user ? (
+                    <span className="px-2.5 py-0.5 text-[11px] font-black bg-emerald-100 text-emerald-800 rounded-full flex items-center gap-1.5 border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                      LOGGED IN
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-900 rounded-full border border-amber-200">
+                      LOCAL DEVICE MODE
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
+                  {user
+                    ? `लॉगिन खाता: ${user.email || 'उपयोगकर्ता'} • डेटा सीधे Firebase क्लाउड में सुरक्षित सिंक है`
+                    : 'Google या Email से लॉगिन करें ताकि सभी कंपनियां, लेजर व वाउचर क्लाउड पर सुरक्षित रहें व किसी भी मोबाइल/लैपटॉप पर खुल सकें'}
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Action Button */}
+            <div className="flex items-center gap-2.5 self-start sm:self-center shrink-0">
+              {user ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsManualSyncing(true);
+                      await forceSyncAllToCloud();
+                      setIsManualSyncing(false);
+                    }}
+                    disabled={isManualSyncing || cloudSyncStatus === 'syncing'}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Force cloud sync right now"
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${
+                        isManualSyncing || cloudSyncStatus === 'syncing'
+                          ? 'animate-spin text-emerald-600'
+                          : 'text-emerald-700'
+                      }`}
+                    />
+                    <span>
+                      {isManualSyncing || cloudSyncStatus === 'syncing' ? 'Syncing...' : 'Sync Now'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthModal(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer"
+                  >
+                    <span>Manage Account</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await logout();
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer"
+                    title="Log out from Cloud"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Logout</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowAuthModal(true)}
+                  className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-black rounded-xl text-xs sm:text-sm shadow-md hover:shadow-lg transition active:scale-95 cursor-pointer"
+                >
+                  <User className="w-4 h-4" />
+                  <span>Login / Sign In (लॉगिन करें)</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Details Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2">
+              {user ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <Cloud className="w-4 h-4 text-amber-500 shrink-0" />
+              )}
+              <span>
+                {user
+                  ? `कंपनियां (${companies.length}) व डेटा क्लाउड स्टोरेज से सुरक्षित रूप से कनेक्टेड हैं।`
+                  : `वर्तमान में ${companies.length} कंपनियां डिवाइस मेमोरी में सुरक्षित हैं। सुरक्षित बैकअप के लिए लॉगिन करें।`}
+              </span>
+            </div>
+
+            {user && lastSyncedAt && (
+              <div className="text-[11px] text-slate-500 font-medium">
+                अंतिम सिंक:{' '}
+                {lastSyncedAt.toLocaleTimeString('hi-IN', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 4. Company Alter / Modification Form */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="bg-slate-50 px-4 sm:px-6 py-3 border-b border-slate-200 flex items-center justify-between">
             <div className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
@@ -544,6 +689,9 @@ export const CompanyProfileModal: React.FC<CompanyProfileModalProps> = ({
           </form>
         </div>
       </main>
+
+      {/* Cloud Account & Login Modal */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );
 };

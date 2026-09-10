@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "type": "object",
+      "description": "User profile settings and active company reference",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "activeCompanyId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "updatedAt"]
+    },
+    "Company": {
+      "title": "Company",
+      "type": "object",
+      "description": "Company profile details",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "country": { "type": "string" },
+        "gstin": { "type": "string" },
+        "pan": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "stateCode": { "type": "string" },
+        "pincode": { "type": "string" },
+        "bankName": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "ifscCode": { "type": "string" },
+        "branch": { "type": "string" },
+        "upiId": { "type": "string" },
+        "termsAndConditions": { "type": "string" },
+        "invoicePrefix": { "type": "string" },
+        "financialYearStart": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "companyName", "state", "stateCode"]
+    },
+    "Voucher": {
+      "title": "Voucher",
+      "type": "object",
+      "description": "Sales, Purchases, Payments, Receipts, Contra, Journal vouchers",
+      "properties": {
+        "id": { "type": "string" },
+        "voucherNumber": { "type": "string" },
+        "type": { "type": "string" },
+        "date": { "type": "string" },
+        "partyId": { "type": "string" },
+        "partyName": { "type": "string" },
+        "totalAmount": { "type": "number" }
+      },
+      "required": ["id", "voucherNumber", "type", "date", "totalAmount"]
+    },
+    "Ledger": {
+      "title": "Ledger",
+      "type": "object",
+      "description": "Account Ledgers",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "group": { "type": "string" },
+        "openingBalance": { "type": "number" },
+        "balanceType": { "type": "string" }
+      },
+      "required": ["id", "name", "group"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "type": "object",
+      "description": "Inventory product item",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "saleRate": { "type": "number" },
+        "unit": { "type": "string" }
+      },
+      "required": ["id", "name", "unit"]
+    },
+    "LedgerGroup": {
+      "title": "LedgerGroup",
+      "type": "object",
+      "description": "Account group",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" }
+      },
+      "required": ["id", "name", "category"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User root document",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    },
+    "/users/{userId}/companies/{companyId}": {
+      "schema": "Company",
+      "description": "Company document belonging to user",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    },
+    "/users/{userId}/companies/{companyId}/vouchers/{voucherId}": {
+      "schema": "Voucher",
+      "description": "Vouchers belonging to company",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    },
+    "/users/{userId}/companies/{companyId}/ledgers/{ledgerId}": {
+      "schema": "Ledger",
+      "description": "Ledgers belonging to company",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    },
+    "/users/{userId}/companies/{companyId}/items/{itemId}": {
+      "schema": "InventoryItem",
+      "description": "Inventory items belonging to company",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    },
+    "/users/{userId}/companies/{companyId}/groups/{groupId}": {
+      "schema": "LedgerGroup",
+      "description": "Ledger groups belonging to company",
+      "allow": {
+        "read": "request.auth != null && request.auth.uid == userId",
+        "write": "request.auth != null && request.auth.uid == userId"
+      }
+    }
+  }
+}

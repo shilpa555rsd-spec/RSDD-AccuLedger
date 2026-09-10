@@ -17,6 +17,7 @@ export interface AccountLedger {
   id: string;
   name: string;
   groupId: string;
+  groupName?: string;
   openingBalance: number;
   openingBalanceType: BalanceType;
   currentBalance?: number;
@@ -65,6 +66,7 @@ export interface RawMaterialConsumption {
   quantity: number;
   rate: number;
   totalCost: number;
+  amount?: number;
 }
 
 export interface AdditionalCostItem {
@@ -86,6 +88,7 @@ export interface ProductionEntry {
   additionalCosts: AdditionalCostItem[];
   totalAdditionalCost: number;
   totalProductionCost: number;
+  totalCost?: number;
   costPerUnit: number;
   notes?: string;
   createdAt: string;
@@ -141,6 +144,7 @@ export interface VoucherItem {
   sgstAmount: number;
   igstAmount: number;
   totalAmount: number;
+  amount?: number;
 }
 
 export interface Voucher {
@@ -175,6 +179,7 @@ export interface Voucher {
 export interface CompanyProfile {
   id: string;
   companyName: string;
+  name?: string;
   tagline?: string;
   ownerName?: string;
   phone: string;
